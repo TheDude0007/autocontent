@@ -1,0 +1,410 @@
+"use client";
+
+import { useState, useRef } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { toast } from "sonner";
+import type { Article } from "./page";
+
+type Topic = { id: string; title: string };
+
+type Props = {
+  campaignId: string;
+  profileName: string;
+  service: string;
+  location: string;
+  selectedTopics: Topic[];
+  initialArticles: Article[];
+  alreadyGenerated: boolean;
+};
+
+export function ArticlesClient({
+  campaignId,
+  profileName,
+  service,
+  location,
+  selectedTopics,
+  initialArticles,
+  alreadyGenerated,
+}: Props) {
+  const router = useRouter();
+  const [articles, setArticles] = useState<Article[]>(initialArticles);
+  const [streaming, setStreaming] = useState(false);
+  const [streamPreview, setStreamPreview] = useState("");
+  const [generated, setGenerated] = useState(alreadyGenerated || initialArticles.length > 0);
+  const [openArticleId, setOpenArticleId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const streamRef = useRef<AbortController | null>(null);
+
+  async function generate() {
+    setStreaming(true);
+    setStreamPreview("");
+    streamRef.current = new AbortController();
+
+    try {
+      const res = await fetch(`/api/campaigns/${campaignId}/articles`, {
+        method: "POST",
+        signal: streamRef.current.signal,
+      });
+
+      if (!res.ok || !res.body) {
+        toast.error("Failed to start generation");
+        setStreaming(false);
+        return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const data = line.slice(6);
+
+          if (data === "[DONE]") {
+            const updated = await fetch(`/api/campaigns/${campaignId}`);
+            const campaign = await updated.json();
+            if (campaign.generatedArticles) {
+              const parsed = JSON.parse(campaign.generatedArticles) as Article[];
+              setArticles(parsed);
+              if (parsed.length > 0) setOpenArticleId(parsed[0].topicId);
+            }
+            setGenerated(true);
+            setStreaming(false);
+            setStreamPreview("");
+            return;
+          }
+
+          const parsed = JSON.parse(data);
+          if (parsed.error) {
+            toast.error(parsed.error);
+            setStreaming(false);
+            return;
+          }
+          if (parsed.text) {
+            setStreamPreview((p) => p + parsed.text);
+          }
+        }
+      }
+    } catch (err) {
+      if ((err as Error).name !== "AbortError") toast.error("Generation failed");
+      setStreaming(false);
+    }
+  }
+
+  function updateArticle(topicId: string, updater: (a: Article) => Article) {
+    setArticles((prev) => prev.map((a) => (a.topicId === topicId ? updater(a) : a)));
+  }
+
+  async function approveAll() {
+    if (articles.length === 0) return;
+    setSaving(true);
+    const res = await fetch(`/api/campaigns/${campaignId}/articles/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ articles }),
+    });
+    if (res.ok) {
+      toast.success("Articles approved — ready to publish");
+      router.push(`/campaigns/${campaignId}/publish`);
+    } else {
+      toast.error("Approval failed");
+      setSaving(false);
+    }
+  }
+
+  const ta = "w-full text-sm text-gray-900 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2.5 leading-relaxed resize-y focus:outline-none focus:ring-1 focus:ring-gray-400 focus:bg-white transition-colors";
+  const inp = "w-full text-sm text-gray-900 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-1 focus:ring-gray-400 focus:bg-white transition-colors";
+
+  return (
+    <div>
+      {/* Header */}
+      <div className="mb-8">
+        <Link href="/" className="text-sm text-gray-500 hover:text-gray-900 mb-3 inline-block">
+          ← Dashboard
+        </Link>
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">Article Generation</h1>
+            <p className="text-sm text-gray-500 mt-1">
+              {profileName} · {service} · {location}
+            </p>
+          </div>
+          <div className="text-xs bg-gray-100 text-gray-600 px-2.5 py-1 rounded-full font-medium">
+            Step 4 of 5
+          </div>
+        </div>
+      </div>
+
+      {/* Generate */}
+      {!generated && !streaming && (
+        <div className="bg-white border border-gray-200 rounded-xl p-8 text-center mb-6">
+          <div className="text-3xl mb-3">◈</div>
+          <h2 className="text-lg font-semibold text-gray-900 mb-2">
+            Generate {selectedTopics.length} article{selectedTopics.length !== 1 ? "s" : ""}
+          </h2>
+          <div className="text-sm text-gray-500 mb-6 max-w-md mx-auto space-y-1">
+            {selectedTopics.map((t) => (
+              <p key={t.id} className="text-gray-600">· {t.title}</p>
+            ))}
+          </div>
+          <button
+            onClick={generate}
+            className="px-6 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-700 transition-colors"
+          >
+            Generate Articles
+          </button>
+        </div>
+      )}
+
+      {/* Streaming */}
+      {streaming && (
+        <div className="bg-white border border-gray-200 rounded-xl p-6 mb-6">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+            <span className="text-sm font-medium text-gray-700">
+              Writing {selectedTopics.length} article{selectedTopics.length !== 1 ? "s" : ""}...
+            </span>
+          </div>
+          <pre className="text-xs text-gray-500 font-mono whitespace-pre-wrap max-h-64 overflow-y-auto leading-relaxed">
+            {streamPreview}
+          </pre>
+        </div>
+      )}
+
+      {/* Article accordion editor */}
+      {generated && !streaming && articles.length > 0 && (
+        <>
+          <div className="flex justify-end mb-4">
+            <button
+              onClick={generate}
+              className="text-sm text-gray-500 hover:text-gray-900 font-medium"
+            >
+              ↺ Regenerate All
+            </button>
+          </div>
+
+          <div className="space-y-3 mb-8">
+            {articles.map((article, articleIdx) => {
+              const isOpen = openArticleId === article.topicId;
+              const metaTitleLen = article.metaTitle.length;
+              const metaDescLen = article.metaDescription.length;
+
+              return (
+                <div key={article.topicId} className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+                  {/* Accordion header */}
+                  <button
+                    onClick={() => setOpenArticleId(isOpen ? null : article.topicId)}
+                    className="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-gray-50 transition-colors"
+                  >
+                    <div>
+                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-0.5">
+                        Article {articleIdx + 1}
+                      </p>
+                      <p className="text-sm font-semibold text-gray-900">{article.title}</p>
+                    </div>
+                    <span className="text-gray-400 text-sm ml-4">{isOpen ? "▲" : "▼"}</span>
+                  </button>
+
+                  {/* Accordion body */}
+                  {isOpen && (
+                    <div className="px-6 pb-6 border-t border-gray-100 pt-5 space-y-5">
+                      {/* Title */}
+                      <div>
+                        <Label text="Title" />
+                        <input
+                          type="text"
+                          value={article.title}
+                          onChange={(e) =>
+                            updateArticle(article.topicId, (a) => ({ ...a, title: e.target.value }))
+                          }
+                          className={inp}
+                        />
+                      </div>
+
+                      {/* Intro */}
+                      <div>
+                        <Label text="Intro" />
+                        <textarea
+                          value={article.intro}
+                          onChange={(e) =>
+                            updateArticle(article.topicId, (a) => ({ ...a, intro: e.target.value }))
+                          }
+                          rows={3}
+                          className={ta}
+                        />
+                      </div>
+
+                      {/* Body sections */}
+                      {article.sections.map((section, si) => (
+                        <div key={si}>
+                          <Label text={`Section ${si + 1}`} />
+                          <input
+                            type="text"
+                            value={section.heading}
+                            onChange={(e) =>
+                              updateArticle(article.topicId, (a) => {
+                                const sections = [...a.sections];
+                                sections[si] = { ...sections[si], heading: e.target.value };
+                                return { ...a, sections };
+                              })
+                            }
+                            placeholder="H2 Heading"
+                            className={inp + " mb-2"}
+                          />
+                          <textarea
+                            value={section.content}
+                            onChange={(e) =>
+                              updateArticle(article.topicId, (a) => {
+                                const sections = [...a.sections];
+                                sections[si] = { ...sections[si], content: e.target.value };
+                                return { ...a, sections };
+                              })
+                            }
+                            rows={5}
+                            className={ta}
+                          />
+                        </div>
+                      ))}
+
+                      {/* FAQ */}
+                      <div>
+                        <Label text={`FAQ (${article.faq.length} items)`} />
+                        <div className="space-y-3">
+                          {article.faq.map((item, fi) => (
+                            <div key={fi} className="bg-gray-50 border border-gray-100 rounded-lg p-3">
+                              <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1.5">
+                                Q{fi + 1}
+                              </p>
+                              <input
+                                type="text"
+                                value={item.question}
+                                onChange={(e) =>
+                                  updateArticle(article.topicId, (a) => {
+                                    const faq = [...a.faq];
+                                    faq[fi] = { ...faq[fi], question: e.target.value };
+                                    return { ...a, faq };
+                                  })
+                                }
+                                className={inp + " mb-2"}
+                              />
+                              <textarea
+                                value={item.answer}
+                                onChange={(e) =>
+                                  updateArticle(article.topicId, (a) => {
+                                    const faq = [...a.faq];
+                                    faq[fi] = { ...faq[fi], answer: e.target.value };
+                                    return { ...a, faq };
+                                  })
+                                }
+                                rows={2}
+                                className={ta}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Conclusion */}
+                      <div>
+                        <Label text="Conclusion" />
+                        <textarea
+                          value={article.conclusion}
+                          onChange={(e) =>
+                            updateArticle(article.topicId, (a) => ({ ...a, conclusion: e.target.value }))
+                          }
+                          rows={3}
+                          className={ta}
+                        />
+                      </div>
+
+                      {/* Internal link */}
+                      <div>
+                        <Label text="Internal Link Suggestion" />
+                        <input
+                          type="text"
+                          value={article.internalLinkSuggestion}
+                          onChange={(e) =>
+                            updateArticle(article.topicId, (a) => ({
+                              ...a,
+                              internalLinkSuggestion: e.target.value,
+                            }))
+                          }
+                          className={inp}
+                        />
+                      </div>
+
+                      {/* Meta */}
+                      <div className="space-y-3">
+                        <div>
+                          <div className="flex justify-between mb-1">
+                            <Label text="Meta Title" />
+                            <span className={`text-xs ${metaTitleLen > 60 ? "text-red-500" : "text-gray-400"}`}>
+                              {metaTitleLen}/60
+                            </span>
+                          </div>
+                          <input
+                            type="text"
+                            value={article.metaTitle}
+                            onChange={(e) =>
+                              updateArticle(article.topicId, (a) => ({ ...a, metaTitle: e.target.value }))
+                            }
+                            className={inp}
+                          />
+                        </div>
+                        <div>
+                          <div className="flex justify-between mb-1">
+                            <Label text="Meta Description" />
+                            <span className={`text-xs ${metaDescLen > 155 ? "text-red-500" : "text-gray-400"}`}>
+                              {metaDescLen}/155
+                            </span>
+                          </div>
+                          <textarea
+                            value={article.metaDescription}
+                            onChange={(e) =>
+                              updateArticle(article.topicId, (a) => ({ ...a, metaDescription: e.target.value }))
+                            }
+                            rows={2}
+                            className={ta}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Approve all */}
+          <div className="flex items-center gap-4 pt-2 pb-8">
+            <button
+              onClick={approveAll}
+              disabled={saving}
+              className="px-6 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {saving ? "Saving..." : `Approve All ${articles.length} Articles & Continue →`}
+            </button>
+            <p className="text-xs text-gray-400">
+              Edit any section above, then approve to unlock publishing.
+            </p>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function Label({ text }: { text: string }) {
+  return (
+    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">{text}</p>
+  );
+}

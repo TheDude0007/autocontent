@@ -1,3 +1,4 @@
+import { unstable_noStore as noStore } from "next/cache";
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import {
@@ -8,6 +9,7 @@ import {
 import { CampaignState } from "@/app/generated/prisma/enums";
 
 async function getCampaigns() {
+  noStore();
   return prisma.campaign.findMany({
     include: {
       serviceProfile: { select: { name: true, service: true, location: true } },

@@ -42,6 +42,116 @@ const intentColors: Record<string, string> = {
   Navigational: "bg-gray-100 text-gray-600",
 };
 
+function buildDownloadHTML(result: DeepQueryResult, images: Record<string, GeneratedImage>): string {
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const facetsHTML = result.semanticFacets.map(f => {
+    const img = images[f.id];
+    const imgTag = img?.dataUri
+      ? `<img src="${img.dataUri}" alt="${esc(f.heading)}" style="width:100%;border-radius:8px;margin-bottom:20px;">`
+      : `<div class="media-brief"><strong>Media Brief:</strong> ${esc(f.mediaBrief)}</div>`;
+
+    const subHTML = f.subSections?.length
+      ? f.subSections.map(s => `<h3>${esc(s.heading)}</h3><p>${esc(s.content)}</p>`).join("")
+      : "";
+
+    const faqHTML = f.faq?.length
+      ? `<div class="faq-block"><h4>Section FAQ</h4>${f.faq.map(q =>
+          `<div class="faq-item"><p class="q"><strong>Q: ${esc(q.question)}</strong></p><p class="a">${esc(q.answer)}</p></div>`
+        ).join("")}</div>`
+      : "";
+
+    const citationsHTML = f.citationSuggestions?.length
+      ? `<div class="citations"><h4>Citation Suggestions</h4>${f.citationSuggestions.map(c =>
+          `<div class="citation"><p><strong>Claim:</strong> ${esc(c.claim)}</p><p><strong>Source type:</strong> ${esc(c.sourceType)}</p><p><strong>Search:</strong> <code>${esc(c.searchQuery)}</code></p></div>`
+        ).join("")}</div>`
+      : "";
+
+    return `
+      <section class="facet">
+        <h2>${esc(f.heading)}</h2>
+        ${imgTag}
+        <p>${esc(f.content).replace(/\n/g, "</p><p>")}</p>
+        ${subHTML}
+        ${faqHTML}
+        ${citationsHTML}
+      </section>`;
+  }).join("\n");
+
+  const masterFaqHTML = result.masterFAQ?.length
+    ? `<section class="master-faq"><h2>FAQ</h2>${result.masterFAQ.map(q =>
+        `<div class="faq-item"><p class="q"><strong>Q: ${esc(q.question)}</strong></p><p class="a">${esc(q.answer)}</p></div>`
+      ).join("")}</section>`
+    : "";
+
+  const relatedHTML = result.relatedQueryTree?.length
+    ? `<section class="related-queries"><h2>Related Queries</h2><ul>${result.relatedQueryTree.map(rq =>
+        `<li><strong>${esc(rq.query)}</strong> <span class="intent">${esc(rq.intent)}</span>${rq.children?.length
+          ? `<ul>${rq.children.map(c => `<li>${esc(c.query)} <span class="intent">${esc(c.intent)}</span></li>`).join("")}</ul>`
+          : ""}</li>`
+      ).join("")}</ul></section>`
+    : "";
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>${esc(result.metaTitle)}</title>
+  <meta name="description" content="${esc(result.metaDescription)}">
+  <style>
+    body { font-family: Georgia, serif; max-width: 860px; margin: 40px auto; padding: 0 24px; color: #1a1a1a; line-height: 1.7; }
+    h1 { font-size: 2rem; margin-bottom: 8px; }
+    h2 { font-size: 1.4rem; margin-top: 48px; margin-bottom: 12px; border-bottom: 2px solid #eee; padding-bottom: 8px; }
+    h3 { font-size: 1.1rem; margin-top: 24px; color: #333; }
+    h4 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.05em; color: #888; margin-top: 24px; margin-bottom: 8px; }
+    p { margin: 0 0 16px; }
+    .meta { background: #f8f8f8; border-radius: 8px; padding: 16px 20px; margin-bottom: 40px; font-size: 0.85rem; color: #555; }
+    .meta strong { color: #111; }
+    .facet { margin-bottom: 56px; }
+    .faq-block, .citations { background: #f9f9f9; border-left: 3px solid #ddd; padding: 16px 20px; border-radius: 0 8px 8px 0; margin-top: 24px; }
+    .faq-item { margin-bottom: 16px; }
+    .faq-item .q { margin-bottom: 4px; }
+    .faq-item .a { color: #444; }
+    .citation { margin-bottom: 12px; font-size: 0.9rem; }
+    .citation code { background: #eee; padding: 2px 6px; border-radius: 4px; font-size: 0.85rem; }
+    .media-brief { background: #f0eeff; border: 1px solid #d8d0ff; border-radius: 8px; padding: 12px 16px; font-size: 0.9rem; color: #5a3fbf; margin-bottom: 20px; }
+    .master-faq { margin-top: 64px; padding-top: 32px; border-top: 3px solid #eee; }
+    .related-queries ul { padding-left: 24px; }
+    .related-queries li { margin-bottom: 8px; }
+    .intent { background: #eee; border-radius: 4px; font-size: 0.75rem; padding: 2px 6px; margin-left: 8px; color: #555; font-family: monospace; }
+    .cta-block { background: #111; color: #fff; padding: 24px 28px; border-radius: 10px; margin-top: 48px; font-size: 1.05rem; font-weight: 600; }
+    .root-query { font-size: 0.8rem; color: #999; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.08em; }
+  </style>
+</head>
+<body>
+  <div class="root-query">Root query: ${esc(result.rootQuery)}</div>
+  <h1>${esc(result.pageH1)}</h1>
+  <div class="meta">
+    <p><strong>Meta title:</strong> ${esc(result.metaTitle)}</p>
+    <p><strong>Meta description:</strong> ${esc(result.metaDescription)}</p>
+  </div>
+  <p>${esc(result.introduction).replace(/\n/g, "</p><p>")}</p>
+  ${facetsHTML}
+  ${masterFaqHTML}
+  ${relatedHTML}
+  <p>${esc(result.conclusion).replace(/\n/g, "</p><p>")}</p>
+  <div class="cta-block">${esc(result.cta)}</div>
+</body>
+</html>`;
+}
+
+function downloadHTML(result: DeepQueryResult, images: Record<string, GeneratedImage>) {
+  const html = buildDownloadHTML(result, images);
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${result.rootQuery.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.html`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 function extractJSON(text: string): string | null {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
@@ -318,6 +428,12 @@ export default function DeepQueryPage() {
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-gray-900">Content Package Ready</h2>
             <div className="flex items-center gap-3">
+              <button
+                onClick={() => downloadHTML(result, images)}
+                className="px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-700 transition-colors"
+              >
+                ↓ Download HTML
+              </button>
               {!generatingImages && Object.keys(images).length === 0 && (
                 <button
                   onClick={() => generateImages(result.semanticFacets)}

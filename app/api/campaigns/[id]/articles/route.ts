@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { anthropic, makeSSEStream } from "@/lib/ai/stream";
-import { ARTICLES_SYSTEM_PROMPT, buildArticlesPrompt } from "@/lib/ai/prompts/articles";
+import { DEEP_QUERY_SYSTEM_PROMPT, buildDeepArticlesPrompt } from "@/lib/ai/prompts/deep-query";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -25,10 +25,11 @@ export async function POST(_req: Request, { params }: Params) {
 
   const p = campaign.serviceProfile;
   const profile = {
+    businessName: p.name,
     service: p.service,
     location: p.location,
-    targetAudience: p.targetAudience,
     usps: JSON.parse(p.usps) as string[],
+    toneNotes: p.toneNotes ?? undefined,
   };
 
   type Topic = { id: string; title: string; targetQuery: string; description: string };
@@ -36,23 +37,21 @@ export async function POST(_req: Request, { params }: Params) {
   const selectedIds = JSON.parse(campaign.selectedTopicIds) as string[];
   const selectedTopics = allTopics.filter((t) => selectedIds.includes(t.id));
 
-  type PageApproved = { metaTitle?: string; heroIntro?: string };
-  const page = JSON.parse(campaign.mainPageApproved) as PageApproved;
-  const pageTitle = page.metaTitle || `${profile.service} in ${profile.location}`;
-
   return makeSSEStream(
     () =>
       anthropic.messages.stream({
         model: "claude-sonnet-4-6",
-        max_tokens: 8000,
-        system: ARTICLES_SYSTEM_PROMPT,
+        max_tokens: 16000,
+        system: DEEP_QUERY_SYSTEM_PROMPT,
         messages: [
-          { role: "user", content: buildArticlesPrompt(profile, selectedTopics, pageTitle) },
+          { role: "user", content: buildDeepArticlesPrompt(profile, selectedTopics) },
         ],
       }),
     async (fullText) => {
-      const jsonText = extractJSONArray(fullText);
-      const articles = JSON.parse(jsonText);
+      const start = fullText.indexOf("[");
+      const end = fullText.lastIndexOf("]");
+      if (start === -1 || end === -1) throw new Error("No JSON array in response");
+      const articles = JSON.parse(fullText.slice(start, end + 1));
       await prisma.campaign.update({
         where: { id },
         data: {
@@ -62,11 +61,4 @@ export async function POST(_req: Request, { params }: Params) {
       });
     }
   );
-}
-
-function extractJSONArray(text: string): string {
-  const start = text.indexOf("[");
-  const end = text.lastIndexOf("]");
-  if (start === -1 || end === -1) throw new Error("No JSON array found in response");
-  return text.slice(start, end + 1);
 }

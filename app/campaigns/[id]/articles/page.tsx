@@ -1,20 +1,10 @@
 import { prisma } from "@/lib/db";
 import { notFound, redirect } from "next/navigation";
 import { ArticlesClient } from "./articles-client";
+import type { DeepQueryResult } from "@/lib/ai/prompts/deep-query";
 
-export type ArticleSection = { heading: string; content: string };
-export type ArticleFAQItem = { question: string; answer: string };
-export type Article = {
-  topicId: string;
-  title: string;
-  intro: string;
-  sections: ArticleSection[];
-  faq: ArticleFAQItem[];
-  conclusion: string;
-  internalLinkSuggestion: string;
-  metaTitle: string;
-  metaDescription: string;
-};
+// Article is a DeepQueryResult with a required topicId
+export type Article = DeepQueryResult & { topicId: string };
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -30,7 +20,6 @@ export default async function ArticlesPage({ params }: Params) {
 
   if (!campaign) notFound();
 
-  // Not ready
   if (
     campaign.state === "INPUT_COMPLETE" ||
     campaign.state === "QUERIES_GENERATED" ||
@@ -42,7 +31,6 @@ export default async function ArticlesPage({ params }: Params) {
     redirect(`/campaigns/${id}/topics`);
   }
 
-  // Already done
   if (
     campaign.state === "OUTPUT_FORMATTED" ||
     campaign.state === "WP_PUSHED" ||

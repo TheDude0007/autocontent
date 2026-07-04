@@ -21,16 +21,33 @@ type ServicePage = {
   metaDescription: string;
 };
 
+type DeepFacet = {
+  id: string;
+  heading: string;
+  content: string;
+  subSections?: { heading: string; content: string }[];
+  faq: { question: string; answer: string }[];
+  mediaBrief: string;
+  citationSuggestions: { claim: string; sourceType: string; searchQuery: string }[];
+};
+
 type Article = {
   topicId: string;
-  title: string;
-  intro: string;
-  sections: { heading: string; content: string }[];
-  faq: { question: string; answer: string }[];
-  conclusion: string;
-  internalLinkSuggestion: string;
+  pageH1: string;
+  rootQuery: string;
   metaTitle: string;
   metaDescription: string;
+  introduction: string;
+  semanticFacets: DeepFacet[];
+  masterFAQ: { question: string; answer: string }[];
+  conclusion: string;
+  cta: string;
+  // legacy fields for backwards compat
+  title?: string;
+  intro?: string;
+  sections?: { heading: string; content: string }[];
+  faq?: { question: string; answer: string }[];
+  internalLinkSuggestion?: string;
 };
 
 type TemplateBlock = { variableName: string; acfFieldName: string };
@@ -55,22 +72,48 @@ function buildPageFields(page: ServicePage, blocks?: TemplateBlock[]): Record<st
   return fields;
 }
 
+function buildArticleHTML(article: Article): string {
+  const sections = (article.semanticFacets ?? []).map((f) => {
+    const subHTML = (f.subSections ?? [])
+      .map((s) => `<h3>${s.heading}</h3><p>${s.content}</p>`)
+      .join("\n");
+    const faqHTML = (f.faq ?? [])
+      .map((q) => `<p><strong>Q: ${q.question}</strong></p><p>${q.answer}</p>`)
+      .join("\n");
+    const mediaBrief = f.mediaBrief
+      ? `<!-- Media brief: ${f.mediaBrief} -->`
+      : "";
+    return `<h2>${f.heading}</h2>\n${mediaBrief}\n<p>${f.content.replace(/\n/g, "</p><p>")}</p>\n${subHTML}${faqHTML ? `\n<h4>FAQ</h4>\n${faqHTML}` : ""}`;
+  }).join("\n\n");
+
+  const masterFAQ = (article.masterFAQ ?? article.faq ?? [])
+    .map((q) => `<p><strong>Q: ${q.question}</strong></p><p>${q.answer}</p>`)
+    .join("\n");
+
+  const intro = article.introduction || article.intro || "";
+  const conclusion = article.conclusion || "";
+  const cta = article.cta || "";
+
+  return [
+    `<p>${intro.replace(/\n/g, "</p><p>")}</p>`,
+    sections,
+    masterFAQ ? `<h2>Frequently Asked Questions</h2>\n${masterFAQ}` : "",
+    conclusion ? `<p>${conclusion.replace(/\n/g, "</p><p>")}</p>` : "",
+    cta ? `<p><strong>${cta}</strong></p>` : "",
+  ].filter(Boolean).join("\n\n");
+}
+
 function buildArticleFields(article: Article, blocks?: TemplateBlock[]): Record<string, string> {
   const fieldFor = (varName: string, defaultField: string) =>
     blocks?.find((b) => b.variableName === varName)?.acfFieldName ?? defaultField;
 
-  const fields: Record<string, string> = {
-    [fieldFor("intro", "article_intro")]: article.intro,
-    [fieldFor("conclusion", "article_conclusion")]: article.conclusion,
-    [fieldFor("internalLink", "internal_link_suggestion")]: article.internalLinkSuggestion,
-    [fieldFor("faqJson", "faq_items")]: JSON.stringify(article.faq),
-  };
+  const allFAQ = article.masterFAQ ?? article.faq ?? [];
 
-  article.sections.forEach((s, i) => {
-    const n = i + 1;
-    fields[fieldFor(`section${n}Heading`, `section_${n}_heading`)] = s.heading;
-    fields[fieldFor(`section${n}Content`, `section_${n}_content`)] = s.content;
-  });
+  const fields: Record<string, string> = {
+    [fieldFor("intro", "article_intro")]: article.introduction || article.intro || "",
+    [fieldFor("conclusion", "article_conclusion")]: article.conclusion,
+    [fieldFor("faqJson", "faq_items")]: JSON.stringify(allFAQ),
+  };
 
   return fields;
 }
@@ -154,9 +197,11 @@ export async function POST(req: Request, { params }: Params) {
   // Push articles
   const articleWpIds: number[] = [];
   for (const article of articles) {
+    const title = article.pageH1 || article.title || article.rootQuery || "Article";
+    const content = buildArticleHTML(article);
     const wpPost = await createWPDraft(siteConfig, {
-      title: article.title,
-      content: article.intro,
+      title,
+      content,
       type: "post",
     });
     const articleFields = buildArticleFields(article, articleTemplate?.blocks);
@@ -166,7 +211,7 @@ export async function POST(req: Request, { params }: Params) {
       description: article.metaDescription,
     });
     articleWpIds.push(wpPost.id);
-    results.articles.push({ title: article.title, ...wpPost });
+    results.articles.push({ title, ...wpPost });
   }
 
   // Advance campaign to COMPLETE

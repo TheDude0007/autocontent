@@ -173,7 +173,38 @@ export default function DeepQueryPage() {
   const [images, setImages] = useState<Record<string, GeneratedImage>>({});
   const [generatingImages, setGeneratingImages] = useState(false);
   const [imageProgress, setImageProgress] = useState(0);
+  const [wpSites, setWpSites] = useState<{ id: string; name: string; url: string }[] | null>(null);
+  const [selectedSiteId, setSelectedSiteId] = useState("");
+  const [publishing, setPublishing] = useState(false);
+  const [publishedUrl, setPublishedUrl] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  async function loadSites() {
+    if (wpSites !== null) return;
+    const res = await fetch("/api/sites");
+    const data = await res.json() as { id: string; name: string; url: string }[];
+    setWpSites(data);
+    if (data.length === 1) setSelectedSiteId(data[0].id);
+  }
+
+  async function publishToWP() {
+    if (!result || !selectedSiteId) return;
+    setPublishing(true);
+    try {
+      const res = await fetch("/api/deep-query/publish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wpSiteId: selectedSiteId, result }),
+      });
+      const data = await res.json() as { editUrl?: string; error?: string };
+      if (data.error) { setError(data.error); }
+      else if (data.editUrl) { setPublishedUrl(data.editUrl); }
+    } catch {
+      setError("WordPress push failed");
+    } finally {
+      setPublishing(false);
+    }
+  }
 
   async function generate() {
     if (!rootQuery.trim() || !businessName.trim() || !location.trim() || !serviceType.trim()) return;
@@ -428,6 +459,37 @@ export default function DeepQueryPage() {
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold text-gray-900">Content Package Ready</h2>
             <div className="flex items-center gap-3">
+              {publishedUrl ? (
+                <a href={publishedUrl} target="_blank" rel="noreferrer" className="px-4 py-2 bg-green-700 text-white text-sm font-medium rounded-md hover:bg-green-800 transition-colors">
+                  View WP Draft →
+                </a>
+              ) : (
+                <div className="flex items-center gap-2">
+                  {wpSites === null ? (
+                    <button onClick={loadSites} className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-md hover:bg-gray-50 transition-colors">
+                      Push to WordPress
+                    </button>
+                  ) : wpSites.length === 0 ? (
+                    <span className="text-xs text-gray-400">No WP sites configured</span>
+                  ) : (
+                    <>
+                      {wpSites.length > 1 && (
+                        <select value={selectedSiteId} onChange={(e) => setSelectedSiteId(e.target.value)} className="text-sm border border-gray-200 rounded-md px-2 py-1.5 focus:outline-none">
+                          <option value="">Select site…</option>
+                          {wpSites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                        </select>
+                      )}
+                      <button
+                        onClick={publishToWP}
+                        disabled={publishing || !selectedSiteId}
+                        className="px-4 py-2 border border-gray-300 text-sm font-medium rounded-md hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      >
+                        {publishing ? "Pushing…" : "Push to WordPress"}
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
               <button
                 onClick={() => downloadHTML(result, images)}
                 className="px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-700 transition-colors"

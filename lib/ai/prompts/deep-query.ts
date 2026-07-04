@@ -1,3 +1,32 @@
+// Shared deep-query types used by both the standalone page and campaign article generation
+export interface DeepFAQ { question: string; answer: string; }
+export interface DeepSubSection { heading: string; content: string; }
+export interface DeepCitation { claim: string; sourceType: string; searchQuery: string; }
+export interface DeepFacet {
+  id: string;
+  heading: string;
+  content: string;
+  subSections?: DeepSubSection[];
+  faq: DeepFAQ[];
+  mediaBrief: string;
+  citationSuggestions: DeepCitation[];
+}
+export interface DeepRelatedChild { query: string; intent: string; }
+export interface DeepRelatedQuery { query: string; intent: string; children: DeepRelatedChild[]; }
+export interface DeepQueryResult {
+  topicId?: string;         // set when used inside a campaign
+  rootQuery: string;
+  pageH1: string;
+  metaTitle: string;
+  metaDescription: string;
+  introduction: string;
+  semanticFacets: DeepFacet[];
+  relatedQueryTree: DeepRelatedQuery[];
+  masterFAQ: DeepFAQ[];
+  conclusion: string;
+  cta: string;
+}
+
 export const DEEP_QUERY_SYSTEM_PROMPT = `You are an AI search optimization specialist. Your job is to take a single root search query and produce a complete, authoritative content package — the kind of page that AI search engines (ChatGPT, Perplexity, Google AI Overviews) cite when answering questions on this topic.
 
 Your output must satisfy EVERY facet of the query: not just what the service is, but safety, reviews, pricing, booking, legality, what to expect, how to verify trustworthiness — whatever sub-questions a real person would have. Each facet gets full written content, not an outline.
@@ -98,4 +127,76 @@ Output ONLY this JSON structure — no markdown, no code fences, nothing before 
 }
 
 Generate 5-8 semantic facets covering every major angle of the query. Generate 8-12 related queries in the tree with 2-3 children each. Generate 5-8 master FAQ items covering what the facets didn't address. Make the content genuinely useful — AI search engines cite content that actually answers the question, not content that dances around it.`;
+}
+
+export interface DeepArticleTopic {
+  id: string;
+  title: string;
+  targetQuery: string;
+  description: string;
+}
+
+export function buildDeepArticlesPrompt(
+  profile: { service: string; location: string; businessName: string; usps: string[]; toneNotes?: string },
+  topics: DeepArticleTopic[]
+): string {
+  const voice = profile.toneNotes?.trim()
+    ? `\nVoice & tone (apply to all articles): ${profile.toneNotes}`
+    : "";
+
+  return `Service: ${profile.service}
+Business name: ${profile.businessName}
+Location: ${profile.location}
+Key differentiators: ${profile.usps.join(", ")}${voice}
+
+You are generating ${topics.length} full content intelligence package(s), one per article topic below. Each package must meet deep query standards: semantic facet decomposition, full prose per facet, per-facet FAQ, specific media briefs, citation suggestions, related query tree, master FAQ.
+
+Topics:
+${topics.map((t, i) => `${i + 1}. Topic ID: "${t.id}"
+   Title: "${t.title}"
+   Target query: "${t.targetQuery}"
+   Focus: ${t.description}`).join("\n\n")}
+
+Output ONLY a JSON array — one object per topic, in the same order. Each object:
+{
+  "topicId": "the topic id from above",
+  "rootQuery": "the targetQuery for this topic",
+  "pageH1": "compelling H1 heading for this article",
+  "metaTitle": "60-char max including location and primary keyword",
+  "metaDescription": "155-char max — factual, no hype",
+  "introduction": "150-200 words. No generic opener. Lead with the most important thing a reader wants to know.",
+  "semanticFacets": [
+    {
+      "id": "facet-slug",
+      "heading": "H2 section heading",
+      "content": "250-350 words of full readable prose. Real paragraphs. Satisfy someone searching specifically about this sub-topic.",
+      "subSections": [
+        { "heading": "H3 sub-heading", "content": "80-120 words" }
+      ],
+      "faq": [
+        { "question": "exact question a real person would ask", "answer": "honest, specific 2-4 sentence answer" }
+      ],
+      "mediaBrief": "Specific visual concept — describe the exact image/graphic, not just 'add a photo'",
+      "citationSuggestions": [
+        { "claim": "specific claim needing external backing", "sourceType": "type of authoritative source", "searchQuery": "Google search to find it" }
+      ]
+    }
+  ],
+  "relatedQueryTree": [
+    {
+      "query": "related search after reading this article",
+      "intent": "Informational | Transactional | Navigational",
+      "children": [
+        { "query": "follow-up question", "intent": "Informational | Transactional | Navigational" }
+      ]
+    }
+  ],
+  "masterFAQ": [
+    { "question": "top-level question not covered by facets", "answer": "specific, honest 2-4 sentence answer" }
+  ],
+  "conclusion": "100-150 words. Summarize key points, soft CTA referencing ${profile.businessName}.",
+  "cta": "One specific CTA referencing the service and ${profile.location}"
+}
+
+Generate 4-6 semantic facets per article. Generate 5-8 related queries per article with 2-3 children each. Generate 4-6 master FAQ items per article. Output the JSON array only — no markdown, no explanation.`;
 }

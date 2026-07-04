@@ -1,6 +1,8 @@
 import OpenAI from "openai";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+function getClient() {
+  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+}
 
 interface ImageRequest {
   facetId: string;
@@ -24,7 +26,7 @@ Style: Clean, professional, high-contrast. Suitable for a business website. No t
 
 async function generateOne(req: ImageRequest): Promise<ImageResult> {
   try {
-    const response = await openai.images.generate({
+    const response = await getClient().images.generate({
       model: "gpt-image-1",
       prompt: buildImagePrompt(req.heading, req.mediaBrief),
       n: 1,

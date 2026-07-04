@@ -71,7 +71,7 @@ export async function writeACFFields(
   type: "pages" | "posts",
   fields: Record<string, string>
 ): Promise<void> {
-  // Try ACF REST API first (requires ACF Pro with REST enabled)
+  // Try ACF REST API first (requires ACF Pro, or free ACF + "ACF to REST API" plugin)
   const acfRes = await wpFetch(site, `/acf/v3/${type}/${postId}`, {
     method: "POST",
     body: JSON.stringify({ fields }),
@@ -91,6 +91,22 @@ export async function writeACFFields(
       );
     }
   }
+
+  // WP returns 200 and silently drops unregistered ACF/REST fields instead of
+  // erroring, so re-fetch and confirm the fields actually persisted.
+  const verifyEndpoint = type === "pages" ? `/wp/v2/pages/${postId}` : `/wp/v2/posts/${postId}`;
+  const verifyRes = await wpFetch(site, `${verifyEndpoint}?context=edit`);
+  const verifyBody = (await verifyRes.json().catch(() => ({}))) as { acf?: unknown };
+  const persistedAcf = (verifyBody.acf ?? {}) as Record<string, unknown>;
+  const missingKeys = Object.keys(fields).filter(
+    (key) => persistedAcf[key] === undefined || persistedAcf[key] === ""
+  );
+  if (missingKeys.length > 0) {
+    throw new Error(
+      `ACF fields did not persist (${missingKeys.join(", ")}). The target WP site likely needs ` +
+        `ACF Pro (or the "ACF to REST API" plugin) and the field group's "Show in REST API" option enabled.`
+    );
+  }
 }
 
 export async function writeYoastMeta(
@@ -109,4 +125,18 @@ export async function writeYoastMeta(
       },
     }),
   });
+
+  // Same silent-drop risk as ACF: confirm the meta actually landed.
+  const verifyRes = await wpFetch(site, `${endpoint}?context=edit`);
+  const verifyBody = (await verifyRes.json().catch(() => ({}))) as { meta?: Record<string, unknown> };
+  const persistedMeta = verifyBody.meta ?? {};
+  if (
+    persistedMeta._yoast_wpseo_title !== meta.title ||
+    persistedMeta._yoast_wpseo_metadesc !== meta.description
+  ) {
+    throw new Error(
+      "Yoast SEO meta did not persist. The target WP site likely needs the Yoast SEO plugin installed " +
+        "with its meta fields registered for the REST API."
+    );
+  }
 }

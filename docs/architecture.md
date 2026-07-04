@@ -363,10 +363,13 @@ User:   Topic: {title}
 
 ### One-Time WP Setup (per client site)
 
-1. Install **ACF Pro** on WordPress
-2. Create ACF Field Group named `seo_tool_content` with fields matching template schema
-3. In Divi, set module Dynamic Content sources → ACF fields
-4. Create Application Password for API user (Editor role minimum)
+1. Install **ACF Pro** on WordPress, **or** free ACF plus the third-party **"ACF to REST API"** plugin — the `/acf/v3/{type}/{id}` write path used by `lib/wordpress.ts` 404s on plain free ACF with no REST bridge installed
+2. Create ACF Field Group named `seo_tool_content` with fields matching template schema, and enable **"Show in REST API"** on the field group — without this, the `acf` fallback write (`POST /wp/v2/pages/{id}` with an `acf` key) returns `200 OK` but **silently drops the fields** (WP ignores unregistered REST fields rather than erroring)
+3. Install **Yoast SEO** and confirm `_yoast_wpseo_title` / `_yoast_wpseo_metadesc` are registered as REST-visible meta — same silent-drop behavior applies if it's missing
+4. In Divi, set module Dynamic Content sources → ACF fields
+5. Create Application Password for API user (Editor role minimum)
+
+Verified against a local test site (free ACF 6.8.4, no Yoast) on 2026-07-04: draft creation and auth work correctly, but both the ACF and Yoast writes returned `200` while persisting nothing — confirming the site needs the plugins above before a real client push, not just correct code.
 
 ### Push Flow
 

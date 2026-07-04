@@ -31,7 +31,7 @@ async function generateOne(req: ImageRequest): Promise<ImageResult> {
       size: "1536x1024",
       quality: "medium",
     });
-    const b64 = response.data[0]?.b64_json ?? null;
+    const b64 = response.data?.[0]?.b64_json ?? null;
     return {
       facetId: req.facetId,
       dataUri: b64 ? `data:image/png;base64,${b64}` : null,

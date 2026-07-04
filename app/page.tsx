@@ -30,12 +30,20 @@ export default async function DashboardPage() {
             Each campaign generates a service page + article cluster for one client service.
           </p>
         </div>
-        <Link
-          href="/campaigns/new"
-          className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-700 transition-colors"
-        >
-          + New Campaign
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/deep-query"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-violet-600 text-white text-sm font-medium rounded-md hover:bg-violet-700 transition-colors"
+          >
+            Deep Query
+          </Link>
+          <Link
+            href="/campaigns/new"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-700 transition-colors"
+          >
+            + New Campaign
+          </Link>
+        </div>
       </div>
 
       {campaigns.length === 0 ? (
